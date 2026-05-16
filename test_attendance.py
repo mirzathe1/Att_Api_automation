@@ -1,81 +1,94 @@
 import asyncio
+import pandas as pd
 from playwright.async_api import async_playwright
 
-# --- CONFIGURATION SECTION ---
-# Update these values based on your current environment
+# 1. Base Project Settings
 BASE_URL = "https://adyelullahil.therapdev.net"
-ENDPOINT = "/therap-api/v1/attendance/inputData"
-# Replace [Token] with your actual Bearer Token from the login API
-AUTH_TOKEN = "Bearer df8e5b9f185e93c14e5eca8a7124e1691239f7ea435a584b8dd6389100902583d418cd599b"
+LOGIN_ENDPOINT = "/therap-api/v1/login"
+ATTENDANCE_ENDPOINT = "/therap-api/v1/attendance/inputData"
+EXCEL_FILE = "attendance_data.xlsx"
 
-# The data we want to send to Therap (from your API Spec)
-ATTENDANCE_PAYLOAD = {
-    "serviceDate": "05/09/2026",
-    "timeInOut": [
-        {
-            "timeIn": "12:11 AM", 
-            "timeOut": "12:15 PM"
-        }
-    ],
-    "optionCode": "P",
-    "status": "APPROVED",
-    "serviceFormId": "BS-MIRNY-Q6P4N5XGUMULE",
-    "comments": "SAMPLE ATTENDANCE CMT"
-}
+async def run_bulk_attendance_audit():
+    # Load the credentials and test data sheets from your Excel file
+    print(f"📂 Reading workbook configurations from {EXCEL_FILE}...")
+    
+    # Read the Credentials sheet and extract the values
+    cred_df = pd.read_excel(EXCEL_FILE, sheet_name="Credentials")
+    login_credentials = {
+        "loginName": str(cred_df.loc[0, "loginName"]),
+        "providerCode": str(cred_df.loc[0, "providerCode"]),
+        "password": str(cred_df.loc[0, "password"])
+    }
+    
+    # Read the main test cases sheet
+    df = pd.read_excel(EXCEL_FILE, sheet_name="AuditData")
 
-async def run_attendance_audit():
-    # Start Playwright
     async with async_playwright() as p:
         
-        # 1. Create a "Request Context" - This is like opening a communication channel
-        # We add our Authentication Token and Headers here once
-        request_context = await p.request.new_context(
+        # Step 1: Create a baseline context and request a fresh token
+        print("🔐 Requesting a fresh Bearer Token from the login endpoint...")
+        login_context = await p.request.new_context(base_url=BASE_URL)
+        
+        login_response = await login_context.post(
+            LOGIN_ENDPOINT,
+            form=login_credentials,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+
+        if login_response.status != 200:
+            print(f"🛑 LOGIN FAILED (Status {login_response.status}). Check credentials inside Excel.")
+            print(f"Server response: {await login_response.text()}")
+            await login_context.dispose()
+            return
+
+        # Extract the security key from the server response
+        login_result = await login_response.json()
+        raw_token = login_result.get("Token")
+        auth_token = f"Bearer {raw_token}"
+        print("🔑 Fresh Token retrieved successfully and saved to memory!")
+        await login_context.dispose()
+
+        # Step 2: Establish a secure session using the newly retrieved token
+        secure_context = await p.request.new_context(
             base_url=BASE_URL,
-            # This tells Playwright to ignore local proxy settings
-            proxy={"server": "per-context"} if False else None, 
             extra_http_headers={
-                "Authorization": AUTH_TOKEN,
+                "Authorization": auth_token,
                 "Content-Type": "application/json",
                 "Accept": "application/json"
             }
         )
 
-        print(f"🚀 Sending Attendance Data to: {ENDPOINT}...")
+        # Step 3: Loop through each row of the Excel sheet and submit the data
+        for index, row in df.iterrows():
+            payload = {
+                "serviceDate": str(row['serviceDate']),
+                "timeInOut": [{
+                    "timeIn": str(row['timeIn']),
+                    "timeOut": str(row['timeOut'])
+                }],
+                "optionCode": str(row['optionCode']),
+                "status": str(row['status']),
+                "serviceFormId": str(row['serviceFormId']),
+                "comments": str(row['comments'])
+            }
 
-        # 2. Execute the POST request
-        # We send our 'ATTENDANCE_PAYLOAD' to the server
-        response = await request_context.post(ENDPOINT, data=ATTENDANCE_PAYLOAD)
+            print(f"🚀 [Row {index+1}] Auditing Attendance for {payload['serviceDate']}...")
+            response = await secure_context.post(ATTENDANCE_ENDPOINT, data=payload)
 
-        # 3. START AUDITING THE RESPONSE
-        
-        # Check if the status code is 200 OK [cite: 125, 131]
-        if response.status == 200:
-            result = await response.json()
-            
-            # Audit Success: Verify the response contains 'formId' [cite: 126]
-            if "formId" in result:
-                print("✅ AUDIT SUCCESS!")
-                print(f"   Record Created. Form ID: {result['formId']}")
+            # Step 4: Evaluate the server response for this specific row
+            if response.status == 200:
+                result = await response.json()
+                print(f"   ✅ SUCCESS: Form ID {result.get('formId')}")
             else:
-                print("⚠️  AUDIT WARNING: Status 200 received, but 'formId' is missing.")
-                print(f"   Response Body: {result}")
-        
-        else:
-            # Audit Failure: Catching and printing error messages 
-            print(f"🛑 AUDIT FAILURE: Server returned Status {response.status}")
-            
-            try:
-                error_data = await response.json()
-                # Get the specific error message defined in your API Spec [cite: 128, 131]
-                error_msg = error_data.get("formattedErrorMessage", "No specific error message provided.")
-                print(f"   Error Reason: {error_msg}")
-            except:
-                # If the response isn't JSON, print the raw text
-                print(f"   Raw Server Response: {await response.text()}")
+                try:
+                    error_json = await response.json()
+                    error_msg = error_json.get("formattedErrorMessage", "Unknown Error")
+                    print(f"   🛑 FAILED (Status {response.status}): {error_msg}")
+                except:
+                    print(f"   🛑 FAILED: Server returned Status {response.status}")
 
-        # Clean up the communication channel
-        await request_context.dispose()
+        # Step 5: Clean up and close the communication channel
+        await secure_context.dispose()
 
-# Run the script
 if __name__ == "__main__":
-    asyncio.run(run_attendance_audit())
+    asyncio.run(run_bulk_attendance_audit())
