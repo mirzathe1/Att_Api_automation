@@ -18,7 +18,7 @@ function sanitizeText(value) {
 async function runBulkAttendanceAudit() {
     console.log("INITIALIZING: Reading excel file data...");
     const workbook = XLSX.readFile(EXCEL_FILE);
-    
+
     // 1. Read Login Credentials
     const credSheet = workbook.Sheets["Credentials"] || workbook.Sheets["credentials"];
     const credData = XLSX.utils.sheet_to_json(credSheet);
@@ -35,7 +35,7 @@ async function runBulkAttendanceAudit() {
     // 3. Create ONE Persistent Session Context (Saves Cookies automatically like Postman)
     const sessionContext = await playwright.request.newContext({ baseURL: BASE_URL });
     console.log("AUTHENTICATION: Fetching login token from server...");
-    
+
     const loginResponse = await sessionContext.post(LOGIN_ENDPOINT, {
         form: loginCredentials,
         headers: { "Content-Type": "application/x-www-form-urlencoded" }
@@ -49,7 +49,8 @@ async function runBulkAttendanceAudit() {
 
     const loginResult = await loginResponse.json();
     const authToken = "Bearer " + loginResult.Token;
-    console.log("AUTHENTICATION: Token retrieved successfully.");
+    console.log("AUTHENTICATION: Token retrieved successfully." + authToken);
+
 
     // WE DO NOT DISPOSE THE BROWSER HERE ANYMORE! This keeps the login cookies alive for the GET request.
 
@@ -70,20 +71,20 @@ async function runBulkAttendanceAudit() {
         if (typeof row.serviceDate === 'number') {
             const parsedDate = new Date(Date.UTC(0, 0, row.serviceDate - 1));
             formattedDate = String(parsedDate.getUTCMonth() + 1).padStart(2, '0') + "/" +
-                            String(parsedDate.getUTCDate()).padStart(2, '0') + "/" +
-                            parsedDate.getUTCFullYear();
+                String(parsedDate.getUTCDate()).padStart(2, '0') + "/" +
+                parsedDate.getUTCFullYear();
         } else {
             formattedDate = String(row.serviceDate).split(" ")[0];
         }
 
         // Run our clean-up helper on each Excel property
-        const cleanFormId   = sanitizeText(row.serviceFormId);
-        const cleanTimeIn   = sanitizeText(row.timeIn);
-        const cleanTimeOut  = sanitizeText(row.timeOut);
+        const cleanFormId = sanitizeText(row.serviceFormId);
+        const cleanTimeIn = sanitizeText(row.timeIn);
+        const cleanTimeOut = sanitizeText(row.timeOut);
         const cleanComments = sanitizeText(row.comments);
 
         // FORCING STATUS TO ALL CAPS 
-        let cleanStatus = "INPREP"; 
+        let cleanStatus = "INPREP";
         if (row.status && String(row.status).toLowerCase() !== "undefined") {
             cleanStatus = String(row.status).trim().toUpperCase();
         }
@@ -99,9 +100,10 @@ async function runBulkAttendanceAudit() {
 
         console.log(" -> [Row " + (index + 1) + "] SENDING DATA: Day " + dataPayload.serviceDate);
         console.log("    => PAYLOAD PACKAGE sent over: " + JSON.stringify(dataPayload));
+        console.log(authToken);
 
         // Send data package to server
-        const response = await sessionContext.post(ATTENDANCE_ENDPOINT, { 
+        const response = await sessionContext.post(ATTENDANCE_ENDPOINT, {
             data: dataPayload,
             headers: {
                 "Authorization": authToken,
@@ -111,6 +113,8 @@ async function runBulkAttendanceAudit() {
             }
         });
         
+        console.log(authToken +" THIS IS before the IF statement ");
+
         // Evaluate outcome
         if (response.status() === 200) {
             const result = await response.json();
@@ -119,15 +123,18 @@ async function runBulkAttendanceAudit() {
 
             console.log("    => VERIFICATION: Double-checking database application visibility...");
             const getUrlPath = "/api/v1/attendances/" + newFormId;
-            
+
             // Sadat Bhai's GET Request using the exact same sessionContext (Cookies + Headers)
+
             const verifyResponse = await sessionContext.get(getUrlPath, {
                 headers: {
                     "Authorization": authToken,
                     "Accept": "application/json",
                     "RequestSource": "iOS"
                 }
+
             });
+            console.log(authToken + " verification er pore");
 
             if (verifyResponse.status() === 200) {
                 const verifyData = await verifyResponse.json();
