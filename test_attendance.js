@@ -33,7 +33,13 @@ async function runBulkAttendanceAudit() {
     const rows = XLSX.utils.sheet_to_json(attendanceSheet);
 
     // 3. Create ONE Persistent Session Context (Saves Cookies automatically like Postman)
-    const sessionContext = await playwright.request.newContext({ baseURL: BASE_URL });
+    const sessionContext = await playwright.request.newContext({ 
+        baseURL: BASE_URL,
+        extraHTTPHeaders: {
+            "User-Agent": "PostmanRuntime/7.36.1", 
+            "Connection": "keep-alive"
+        }
+    });
     console.log("AUTHENTICATION: Fetching login token from server...");
 
     const loginResponse = await sessionContext.post(LOGIN_ENDPOINT, {
@@ -49,8 +55,7 @@ async function runBulkAttendanceAudit() {
 
     const loginResult = await loginResponse.json();
     const authToken = "Bearer " + loginResult.Token;
-    console.log("AUTHENTICATION: Token retrieved successfully." + authToken);
-
+    console.log("AUTHENTICATION: Token retrieved successfully.");
 
     // WE DO NOT DISPOSE THE BROWSER HERE ANYMORE! This keeps the login cookies alive for the GET request.
 
@@ -100,7 +105,6 @@ async function runBulkAttendanceAudit() {
 
         console.log(" -> [Row " + (index + 1) + "] SENDING DATA: Day " + dataPayload.serviceDate);
         console.log("    => PAYLOAD PACKAGE sent over: " + JSON.stringify(dataPayload));
-        console.log(authToken);
 
         // Send data package to server
         const response = await sessionContext.post(ATTENDANCE_ENDPOINT, {
@@ -109,11 +113,9 @@ async function runBulkAttendanceAudit() {
                 "Authorization": authToken,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "RequestSource": "iOS" // Adding iOS header to POST just in case
+                "RequestSource": "iOS"
             }
         });
-        
-        console.log(authToken +" THIS IS before the IF statement ");
 
         // Evaluate outcome
         if (response.status() === 200) {
@@ -125,16 +127,18 @@ async function runBulkAttendanceAudit() {
             const getUrlPath = "/api/v1/attendances/" + newFormId;
 
             // Sadat Bhai's GET Request using the exact same sessionContext (Cookies + Headers)
-
             const verifyResponse = await sessionContext.get(getUrlPath, {
                 headers: {
                     "Authorization": authToken,
                     "Accept": "application/json",
-                    "RequestSource": "iOS"
+                    "RequestSource": "iOS",
+                    // --- EXPERIMENTAL MOBILE API HEADERS INJECTED HERE ---
+                    "Provider-Code": loginCredentials.providerCode,
+                    "ProviderCode": loginCredentials.providerCode,
+                    "X-Provider": loginCredentials.providerCode,
+                    "App-Version": "1.0"
                 }
-
             });
-            console.log(authToken + " verification er pore");
 
             if (verifyResponse.status() === 200) {
                 const verifyData = await verifyResponse.json();
