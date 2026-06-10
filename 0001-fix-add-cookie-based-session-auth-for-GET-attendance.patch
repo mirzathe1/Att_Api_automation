@@ -1,0 +1,209 @@
+From c669fddae0b3eea17a99cf6df8b5b170b0aee668 Mon Sep 17 00:00:00 2001
+From: Adyel Ullahil Mamun <adyel.ullahil@therapservices.net>
+Date: Wed, 10 Jun 2026 12:16:54 +0600
+Subject: [PATCH] fix: add cookie-based session auth for GET attendance
+ verification
+
+- Add second login via /auth/api/v1/login to establish session cookies
+  (the /api/v1/attendances/ endpoint requires cookie auth, not Bearer token)
+- Include maxInactiveMinutes and cookieEnabled params in login request
+- Remove experimental Provider-Code/X-Provider headers from GET request
+- Add detailed debug logging: full URL, request/response headers,
+  session cookies, and response body for easier troubleshooting
+- Add 60s timeout on GET verification request
+---
+ attendance_data.xlsx | Bin 8647 -> 8662 bytes
+ test_attendance.js   |  79 ++++++++++++++++++++++++++++++++-----------
+ 2 files changed, 60 insertions(+), 19 deletions(-)
+
+diff --git a/attendance_data.xlsx b/attendance_data.xlsx
+index 4f5c8bedd2f08e89266751f2c5a98ae78de338c1..9c31cf2b027d275c0f323011cabdee39c207de5a 100644
+GIT binary patch
+delta 1858
+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
+IC=3w)51b7Q2><{9
+
+delta 1823
+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
+
+diff --git a/test_attendance.js b/test_attendance.js
+index 23cab57..d89efb2 100644
+--- a/test_attendance.js
++++ b/test_attendance.js
+@@ -33,17 +33,17 @@ async function runBulkAttendanceAudit() {
+     const rows = XLSX.utils.sheet_to_json(attendanceSheet);
+ 
+     // 3. Create ONE Persistent Session Context (Saves Cookies automatically like Postman)
+-    const sessionContext = await playwright.request.newContext({ 
+-        baseURL: BASE_URL,
+-        extraHTTPHeaders: {
+-            "User-Agent": "PostmanRuntime/7.36.1", 
+-            "Connection": "keep-alive"
+-        }
++    const sessionContext = await playwright.request.newContext({
++        baseURL: BASE_URL
+     });
+     console.log("AUTHENTICATION: Fetching login token from server...");
+ 
+     const loginResponse = await sessionContext.post(LOGIN_ENDPOINT, {
+-        form: loginCredentials,
++        form: {
++            ...loginCredentials,
++            maxInactiveMinutes: "30",
++            cookieEnabled: "true"
++        },
+         headers: { "Content-Type": "application/x-www-form-urlencoded" }
+     });
+ 
+@@ -55,7 +55,29 @@ async function runBulkAttendanceAudit() {
+ 
+     const loginResult = await loginResponse.json();
+     const authToken = "Bearer " + loginResult.Token;
+-    console.log("AUTHENTICATION: Token retrieved successfully.");
++    console.log("AUTHENTICATION: Bearer token retrieved successfully.");
++
++    // 4. Establish session cookies via the Postman login endpoint (needed for GET /api/v1/ endpoints)
++    console.log("AUTHENTICATION: Establishing session cookies via /auth/api/v1/login...");
++    const cookieLoginResponse = await sessionContext.post("/auth/api/v1/login", {
++        form: {
++            ...loginCredentials,
++            maxInactiveMinutes: "30",
++            cookieEnabled: "true"
++        },
++        headers: {
++            "Content-Type": "application/x-www-form-urlencoded",
++            "RequestSource": "iOS"
++        }
++    });
++
++    if (cookieLoginResponse.status() === 200) {
++        const cookieState = await sessionContext.storageState();
++        console.log("AUTHENTICATION: Session cookies established (" + cookieState.cookies.length + " cookies set).");
++        console.log("    => [DEBUG] Cookies: " + JSON.stringify(cookieState.cookies.map(c => c.name)));
++    } else {
++        console.log("WARNING: Cookie-based login returned status " + cookieLoginResponse.status() + " — GET verification may fail.");
++    }
+ 
+     // WE DO NOT DISPOSE THE BROWSER HERE ANYMORE! This keeps the login cookies alive for the GET request.
+ 
+@@ -125,21 +147,40 @@ async function runBulkAttendanceAudit() {
+ 
+             console.log("    => VERIFICATION: Double-checking database application visibility...");
+             const getUrlPath = "/api/v1/attendances/" + newFormId;
++            const fullGetUrl = BASE_URL + getUrlPath;
++
++            console.log("    => [DEBUG] GET Full URL: " + fullGetUrl);
++            console.log("    => [DEBUG] GET Path: " + getUrlPath);
+ 
+-            // Sadat Bhai's GET Request using the exact same sessionContext (Cookies + Headers)
++            const getHeaders = {
++                "Authorization": authToken,
++                "Accept": "application/json",
++                "RequestSource": "iOS"
++            };
++            console.log("    => [DEBUG] GET Request Headers: " + JSON.stringify(getHeaders, null, 2));
++
++            // Log session cookies
++            const cookies = await sessionContext.storageState();
++            console.log("    => [DEBUG] Session Cookies: " + JSON.stringify(cookies.cookies.map(c => ({ name: c.name, domain: c.domain, path: c.path })), null, 2));
++
++            // GET Request using the exact same sessionContext (Cookies handle auth like Postman)
+             const verifyResponse = await sessionContext.get(getUrlPath, {
+-                headers: {
+-                    "Authorization": authToken,
+-                    "Accept": "application/json",
+-                    "RequestSource": "iOS",
+-                    // --- EXPERIMENTAL MOBILE API HEADERS INJECTED HERE ---
+-                    "Provider-Code": loginCredentials.providerCode,
+-                    "ProviderCode": loginCredentials.providerCode,
+-                    "X-Provider": loginCredentials.providerCode,
+-                    "App-Version": "1.0"
+-                }
++                headers: getHeaders,
++                timeout: 60000
+             });
+ 
++            console.log("    => [DEBUG] GET Response Status: " + verifyResponse.status() + " " + verifyResponse.statusText());
++
++            // Log response headers
++            const respHeaders = verifyResponse.headers();
++            console.log("    => [DEBUG] GET Response Headers: " + JSON.stringify(respHeaders, null, 2));
++
++            // Log response body
++            try {
++                const respBody = await verifyResponse.text();
++                console.log("    => [DEBUG] GET Response Body: " + respBody.substring(0, 1000));
++            } catch (_) { }
++
+             if (verifyResponse.status() === 200) {
+                 const verifyData = await verifyResponse.json();
+                 console.log("    => VERIFICATION RESULT: PASSED (Database confirms state: " + verifyData.status + ")");
+-- 
+2.54.0
+

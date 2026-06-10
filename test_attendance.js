@@ -16,7 +16,9 @@ function sanitizeText(value) {
 }
 
 async function runBulkAttendanceAudit() {
-    console.log("INITIALIZING: Reading excel file data...");
+    console.log("\n[SYSTEM] Initializing bulk attendance pipeline...");
+    console.log(`[SYSTEM] Reading configuration from ${EXCEL_FILE}...`);
+
     const workbook = XLSX.readFile(EXCEL_FILE);
 
     // 1. Read Login Credentials
@@ -32,46 +34,62 @@ async function runBulkAttendanceAudit() {
     const attendanceSheet = workbook.Sheets["AttendanceRecords"];
     const rows = XLSX.utils.sheet_to_json(attendanceSheet);
 
-    // 3. Create ONE Persistent Session Context (Saves Cookies automatically like Postman)
-    const sessionContext = await playwright.request.newContext({ 
-        baseURL: BASE_URL,
-        extraHTTPHeaders: {
-            "User-Agent": "PostmanRuntime/7.36.1", 
-            "Connection": "keep-alive"
-        }
+    // 3. Create Persistent Session Context 
+    const sessionContext = await playwright.request.newContext({
+        baseURL: BASE_URL
     });
-    console.log("AUTHENTICATION: Fetching login token from server...");
 
+    console.log("[AUTH]   Negotiating security tokens and session cookies...");
+
+    // Step A: Fetch Bearer Token
     const loginResponse = await sessionContext.post(LOGIN_ENDPOINT, {
-        form: loginCredentials,
+        form: {
+            ...loginCredentials,
+            maxInactiveMinutes: "30",
+            cookieEnabled: "true"
+        },
         headers: { "Content-Type": "application/x-www-form-urlencoded" }
     });
 
     if (loginResponse.status() !== 200) {
-        console.log("CRITICAL ERROR: Login failed with status code " + loginResponse.status());
+        console.log(`[ERROR]  Login failed with status code ${loginResponse.status()}`);
         await sessionContext.dispose();
         return;
     }
 
     const loginResult = await loginResponse.json();
     const authToken = "Bearer " + loginResult.Token;
-    console.log("AUTHENTICATION: Token retrieved successfully.");
 
-    // WE DO NOT DISPOSE THE BROWSER HERE ANYMORE! This keeps the login cookies alive for the GET request.
+    // Step B: Establish Session Cookies
+    const cookieLoginResponse = await sessionContext.post("/auth/api/v1/login", {
+        form: {
+            ...loginCredentials,
+            maxInactiveMinutes: "30",
+            cookieEnabled: "true"
+        },
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "RequestSource": "iOS"
+        }
+    });
 
-    console.log("LOOP START: Processing data rows sequentially...");
+    if (cookieLoginResponse.status() !== 200) {
+        console.log("[WARN]   Cookie-based login failed. Verification checks may drop.");
+    } else {
+        console.log("[AUTH]   Success. Secure session locked.\n");
+    }
+
+    console.log(`[PROCESS] Starting data execution loop for ${rows.length} records...\n`);
 
     // 5. Main Processing Loop
     for (let index = 0; index < rows.length; index++) {
         const row = rows[index];
 
-        // Skip row if the date column is completely empty
         if (!row.serviceDate) {
-            console.log(" -> [Row " + (index + 1) + "] SKIPPED: Date cell is empty.");
+            console.log(`[Row ${index + 1}] SKIPPED: Date cell is empty.\n`);
             continue;
         }
 
-        // Fix Excel Date format
         let formattedDate = "";
         if (typeof row.serviceDate === 'number') {
             const parsedDate = new Date(Date.UTC(0, 0, row.serviceDate - 1));
@@ -82,13 +100,11 @@ async function runBulkAttendanceAudit() {
             formattedDate = String(row.serviceDate).split(" ")[0];
         }
 
-        // Run our clean-up helper on each Excel property
         const cleanFormId = sanitizeText(row.serviceFormId);
         const cleanTimeIn = sanitizeText(row.timeIn);
         const cleanTimeOut = sanitizeText(row.timeOut);
         const cleanComments = sanitizeText(row.comments);
 
-        // FORCING STATUS TO ALL CAPS 
         let cleanStatus = "INPREP";
         if (row.status && String(row.status).toLowerCase() !== "undefined") {
             cleanStatus = String(row.status).trim().toUpperCase();
@@ -103,10 +119,8 @@ async function runBulkAttendanceAudit() {
             comments: cleanComments
         };
 
-        console.log(" -> [Row " + (index + 1) + "] SENDING DATA: Day " + dataPayload.serviceDate);
-        console.log("    => PAYLOAD PACKAGE sent over: " + JSON.stringify(dataPayload));
+        console.log(`[Row ${index + 1}] Submitting attendance for Date: ${dataPayload.serviceDate}`);
 
-        // Send data package to server
         const response = await sessionContext.post(ATTENDANCE_ENDPOINT, {
             data: dataPayload,
             headers: {
@@ -117,50 +131,55 @@ async function runBulkAttendanceAudit() {
             }
         });
 
-        // Evaluate outcome
         if (response.status() === 200) {
             const result = await response.json();
             const newFormId = result.formId;
-            console.log("    => STATUS: SUCCESS. Generated record Form ID: " + newFormId);
+            console.log(`    [POST] SUCCESS - Generated Form ID: ${newFormId}`);
+            console.log(`    [GET]  Verifying record against database...`);
 
-            console.log("    => VERIFICATION: Double-checking database application visibility...");
             const getUrlPath = "/api/v1/attendances/" + newFormId;
-
-            // Sadat Bhai's GET Request using the exact same sessionContext (Cookies + Headers)
             const verifyResponse = await sessionContext.get(getUrlPath, {
                 headers: {
                     "Authorization": authToken,
                     "Accept": "application/json",
-                    "RequestSource": "iOS",
-                    // --- EXPERIMENTAL MOBILE API HEADERS INJECTED HERE ---
-                    "Provider-Code": loginCredentials.providerCode,
-                    "ProviderCode": loginCredentials.providerCode,
-                    "X-Provider": loginCredentials.providerCode,
-                    "App-Version": "1.0"
-                }
+                    "RequestSource": "iOS"
+                },
+                timeout: 60000
             });
 
-            if (verifyResponse.status() === 200) {
-                const verifyData = await verifyResponse.json();
-                console.log("    => VERIFICATION RESULT: PASSED (Database confirms state: " + verifyData.status + ")");
-            } else {
-                console.log("    => VERIFICATION RESULT: FAILED (Server returned status code: " + verifyResponse.status() + ")");
+            try {
+                const respBody = await verifyResponse.text();
+                if (verifyResponse.status() === 200) {
+                    const verifyData = JSON.parse(respBody);
+                    console.log(`    [GET]  PASSED - Record verified on server.`);
+
+                    // Print detailed proof using standard spacing
+                    console.log(`           - Saved Status : ${verifyData.attendanceStatus}`);
+                    console.log(`           - Saved Date   : ${verifyData.serviceDate}`);
+                    if (verifyData.timeInOut && verifyData.timeInOut.length > 0) {
+                        console.log(`           - Saved Time   : ${verifyData.timeInOut[0].timeIn} to ${verifyData.timeInOut[0].timeOut}`);
+                    }
+                    console.log(""); // Empty line for spacing
+                } else {
+                    console.log(`    [GET]  FAILED - Server returned status code: ${verifyResponse.status()}\n`);
+                }
+            } catch (e) {
+                console.log("    [GET]  FAILED - Could not parse server response\n");
             }
+
         } else {
-            console.log("    => Failed");
             try {
                 const serverError = await response.json();
                 const actualReason = serverError.formattedErrorMessage || serverError.error_msg || "Unknown Server Exception";
-                console.log("    => ERROR REASON: " + actualReason);
+                console.log(`    [POST] FAILED - Reason: ${actualReason}\n`);
             } catch (err) {
-                console.log("    => ERROR REASON: Server crashed completely with HTTP Status " + response.status());
+                console.log(`    [POST] FAILED - Server crashed with HTTP Status ${response.status()}\n`);
             }
         }
     }
 
-    // 6. Clean up connection only after the entire loop is finished
     await sessionContext.dispose();
-    console.log("EXECUTION COMPLETE: All records processed cleanly.");
+    console.log("[SYSTEM] Execution complete. All records processed cleanly.\n");
 }
 
 runBulkAttendanceAudit();
