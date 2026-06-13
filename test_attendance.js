@@ -153,13 +153,12 @@ async function runBulkAttendanceAudit() {
                     const verifyData = JSON.parse(respBody);
                     console.log(`    [GET]  PASSED - Record verified on server.`);
 
-                    // Print detailed proof using standard spacing
                     console.log(`           - Saved Status : ${verifyData.attendanceStatus}`);
                     console.log(`           - Saved Date   : ${verifyData.serviceDate}`);
                     if (verifyData.timeInOut && verifyData.timeInOut.length > 0) {
                         console.log(`           - Saved Time   : ${verifyData.timeInOut[0].timeIn} to ${verifyData.timeInOut[0].timeOut}`);
                     }
-                    console.log(""); // Empty line for spacing
+                    console.log("");
                 } else {
                     console.log(`    [GET]  FAILED - Server returned status code: ${verifyResponse.status()}\n`);
                 }
