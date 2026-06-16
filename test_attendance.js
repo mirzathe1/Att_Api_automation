@@ -138,12 +138,14 @@ async function runBulkAttendanceAudit() {
             console.log(`    [GET]  Verifying record against database...`);
 
             const getUrlPath = "/api/v1/attendances/" + newFormId;
+            const apiHeaders = {
+                "Authorization": authToken,
+                "Accept": "application/json",
+                "RequestSource": "iOS"
+            };
+
             const verifyResponse = await sessionContext.get(getUrlPath, {
-                headers: {
-                    "Authorization": authToken,
-                    "Accept": "application/json",
-                    "RequestSource": "iOS"
-                },
+                headers: apiHeaders,
                 timeout: 60000
             });
 
@@ -158,7 +160,41 @@ async function runBulkAttendanceAudit() {
                     if (verifyData.timeInOut && verifyData.timeInOut.length > 0) {
                         console.log(`           - Saved Time   : ${verifyData.timeInOut[0].timeIn} to ${verifyData.timeInOut[0].timeOut}`);
                     }
-                    console.log("");
+
+                    // =========================================================
+                    // BRAND NEW TEARDOWN STEP (Using YAML Rules)
+                    // =========================================================
+                    console.log(`    [POST] Removing record to clean up test data...`);
+
+                    const deletePayload = {
+                        formId: newFormId,
+                        serviceDate: verifyData.serviceDate,
+                        version: verifyData.version,
+                        action: "DELETE"
+                    };
+
+                    const deleteResponse = await sessionContext.post(getUrlPath, {
+                        data: deletePayload,
+                        headers: {
+                            ...apiHeaders,
+                            "Content-Type": "application/json"
+                        },
+                        timeout: 60000
+                    });
+
+                    if (deleteResponse.status() === 200) {
+                        console.log(`    [POST] SUCCESS - Record deleted cleanly.\n`);
+                    } else {
+                        try {
+                            const errorData = await deleteResponse.json();
+                            const errorMsg = errorData.error_msg || "Validation Failed";
+                            console.log(`    [POST] FAILED - Reason: ${errorMsg} (Status ${deleteResponse.status()})\n`);
+                        } catch (e) {
+                            console.log(`    [POST] FAILED - Server returned status code: ${deleteResponse.status()}\n`);
+                        }
+                    }
+                    // =========================================================
+
                 } else {
                     console.log(`    [GET]  FAILED - Server returned status code: ${verifyResponse.status()}\n`);
                 }
