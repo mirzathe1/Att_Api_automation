@@ -1,10 +1,12 @@
 import { test, expect, request } from '@playwright/test';
-// IMPORT THE NEW FUNCTION HERE:
 import { getExcelData, sanitizeText, incrementExcelDates } from '../utils/excelReader.js';
 import { TherapClient } from '../api/TherapClient.js';
 
 const BASE_URL = "https://billing.therapdev.net";
 const EXCEL_FILE = "attendance_data.xlsx";
+
+// Helper function to create a delay
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('Bulk Attendance API Audit (Controller Pattern)', async () => {
     
@@ -41,18 +43,26 @@ test('Bulk Attendance API Audit (Controller Pattern)', async () => {
             // POST Request
             const postResponse = await api.submitAttendance(dataPayload);
             
-            // --- DEBUG LOGGING ---
             if (postResponse.status() !== 200) {
                 const errorBody = await postResponse.json();
-                console.log(`[422 ERROR DETAILS] Row ${index + 1}:`, errorBody);
+                console.log(`[POST ERROR DETAILS] Row ${index + 1}:`, errorBody);
             }
 
             expect(postResponse.status(), 'POST request should succeed').toBe(200);
             const result = await postResponse.json();
             const newFormId = result.formId;
 
+            // Wait for 3 seconds to allow database replication/permissions to sync
+            await delay(3000); 
+
             // GET Request (Verification)
             const verifyResponse = await api.verifyAttendance(newFormId);
+            
+            if (verifyResponse.status() !== 200) {
+                const errorText = await verifyResponse.text();
+                console.log(`[GET ERROR DETAILS] Row ${index + 1} | Status: ${verifyResponse.status()} | Body:`, errorText);
+            }
+
             expect(verifyResponse.status(), 'GET verification should succeed').toBe(200);
 
             const verifyData = await verifyResponse.json();
@@ -63,7 +73,6 @@ test('Bulk Attendance API Audit (Controller Pattern)', async () => {
     // 4. Teardown & Data Rotation (Write-Back)
     await test.step('Cleanup and Rotate Test Data', async () => {
         await sessionContext.dispose();
-        // Automatically push the dates forward for tomorrow's test
         incrementExcelDates(EXCEL_FILE);
     });
 });

@@ -1,76 +1,81 @@
-import XLSX from 'xlsx';
+import xlsx from 'xlsx';
 
+/**
+ * Sanitizes input strings safely
+ */
+export function sanitizeText(val) {
+    if (val === undefined || val === null) return "";
+    return String(val).trim();
+}
+
+/**
+ * Reads credentials from 'Credentials' sheet and rows from 'AttendanceRecords' sheet
+ */
 export function getExcelData(filePath) {
-    const workbook = XLSX.readFile(filePath);
-
-    // 1. Read Login Credentials
-    const credSheet = workbook.Sheets["Credentials"] || workbook.Sheets["credentials"];
-    const credData = XLSX.utils.sheet_to_json(credSheet);
+    const workbook = xlsx.readFile(filePath);
+    
+    // 1. Read Credentials Sheet
+    const credsSheet = workbook.Sheets['Credentials'];
+    if (!credsSheet) {
+        throw new Error("Sheet named 'Credentials' not found in Excel file.");
+    }
+    const credsData = xlsx.utils.sheet_to_json(credsSheet);
+    
     const loginCredentials = {
-        loginName: String(credData[0].loginName),
-        providerCode: String(credData[0].providerCode),
-        password: String(credData[0].password)
+        loginName: credsData[0]?.loginName || credsData[0]?.username || "",
+        password: credsData[0]?.password || "",
+        providerCode: credsData[0]?.providerCode || ""
     };
 
-    // 2. Read Attendance Records Data
-    const attendanceSheet = workbook.Sheets["AttendanceRecords"];
-    const rows = XLSX.utils.sheet_to_json(attendanceSheet);
-
-    return { loginCredentials, rows };
-}
-
-export function sanitizeText(value) {
-    if (!value || String(value).toLowerCase() === "undefined") {
-        return "";
+    // 2. Read Attendance Records Sheet
+    const attendanceSheet = workbook.Sheets['AttendanceRecords'];
+    if (!attendanceSheet) {
+        throw new Error("Sheet named 'AttendanceRecords' not found in Excel file.");
     }
-    return String(value).trim();
+    const rows = xlsx.utils.sheet_to_json(attendanceSheet);
+
+    return {
+        loginCredentials,
+        rows
+    };
 }
 
-// --- NEW FUNCTION: The Excel Write-Back Logic (NaN Fix Applied) ---
+/**
+ * Automatically increments dates in 'AttendanceRecords' sheet for repeat runs
+ */
 export function incrementExcelDates(filePath) {
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = "AttendanceRecords";
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = 'AttendanceRecords';
     const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet);
+    
+    if (!sheet) {
+        console.log(`[SYSTEM] Could not find '${sheetName}' sheet to update dates.`);
+        return;
+    }
 
-    for (let i = 0; i < rows.length; i++) {
-        if (!rows[i].serviceDate) continue;
+    const rawData = xlsx.utils.sheet_to_json(sheet);
 
-        let parsedDate;
-        
-        // 1. If it's an Excel Serial Number
-        if (typeof rows[i].serviceDate === 'number') {
-            parsedDate = new Date(Date.UTC(0, 0, rows[i].serviceDate - 1));
-        } 
-        // 2. If it's already a String (e.g., "06/01/2026")
-        else {
-            let dateStr = String(rows[i].serviceDate).split(" ")[0];
-            let parts = dateStr.split("/"); 
-            
-            if (parts.length === 3) {
-                // Manually map MM/DD/YYYY to avoid the NaN "Invalid Date" bug
-                // Note: Months are 0-indexed in JS (so we do Month - 1)
-                parsedDate = new Date(Date.UTC(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1])));
-            } else {
-                // Fallback for weird formats
-                parsedDate = new Date(dateStr); 
+    const updatedData = rawData.map(row => {
+        if (!row.serviceDate) return row;
+
+        if (typeof row.serviceDate === 'number') {
+            return { ...row, serviceDate: row.serviceDate + 1 };
+        } else {
+            const dateObj = new Date(row.serviceDate);
+            if (!isNaN(dateObj.getTime())) {
+                dateObj.setDate(dateObj.getDate() + 1);
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const year = dateObj.getFullYear();
+                return { ...row, serviceDate: `${month}/${day}/${year}` };
             }
         }
+        return row;
+    });
 
-        // Add 1 day safely in UTC
-        parsedDate.setUTCDate(parsedDate.getUTCDate() + 1);
-
-        // Format strictly as MM/DD/YYYY string
-        const nextDayStr = String(parsedDate.getUTCMonth() + 1).padStart(2, '0') + "/" +
-                           String(parsedDate.getUTCDate()).padStart(2, '0') + "/" +
-                           parsedDate.getUTCFullYear();
-        
-        rows[i].serviceDate = nextDayStr;
-    }
-
-    // Overwrite the sheet with the newly incremented dates
-    const updatedSheet = XLSX.utils.json_to_sheet(rows);
-    workbook.Sheets[sheetName] = updatedSheet;
-    XLSX.writeFile(workbook, filePath);
-    console.log(`\n[SYSTEM] Success! Excel dates incremented by +1 day safely.`);
+    const newSheet = xlsx.utils.json_to_sheet(updatedData);
+    workbook.Sheets[sheetName] = newSheet;
+    xlsx.writeFile(workbook, filePath);
+    console.log('[SYSTEM] Excel dates successfully incremented by +1 day in AttendanceRecords.');
 }
+

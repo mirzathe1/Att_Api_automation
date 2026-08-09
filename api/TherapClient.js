@@ -3,9 +3,13 @@ export class TherapClient {
         this.request = requestContext;
         this.baseUrl = baseUrl;
         this.authToken = null;
+        this.providerCode = null; 
     }
 
     async authenticate(credentials) {
+        // Capture provider code for subsequent requests
+        this.providerCode = credentials.providerCode;
+
         // Step A: Fetch Bearer Token
         const loginResponse = await this.request.post(`${this.baseUrl}/therap-api/v1/login`, {
             form: {
@@ -40,10 +44,12 @@ export class TherapClient {
         return await this.request.post(`${this.baseUrl}/therap-api/v1/attendance/inputData`, {
             data: dataPayload,
             headers: {
-                "Authorization": this.authToken,
+                 "Authorization": this.authToken,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "RequestSource": "iOS"
+                "RequestSource": "iOS",
+                "Provider-Code": this.providerCode,
+                "X-Provider": this.providerCode
             }
         });
     }
@@ -51,9 +57,11 @@ export class TherapClient {
     async verifyAttendance(formId) {
         return await this.request.get(`${this.baseUrl}/api/v1/attendances/${formId}`, {
             headers: {
-                "Authorization": this.authToken,
+                 "Authorization": this.authToken,
                 "Accept": "application/json",
-                "RequestSource": "iOS"
+                "RequestSource": "iOS",
+                "Provider-Code": this.providerCode,
+                "X-Provider": this.providerCode
             },
             timeout: 60000
         });
