@@ -63,7 +63,7 @@ export class TherapClient {
                 "Provider-Code": this.providerCode,
                 "X-Provider": this.providerCode
             },
-            timeout: 60000
+            timeout: 50000
         });
     }
 }
