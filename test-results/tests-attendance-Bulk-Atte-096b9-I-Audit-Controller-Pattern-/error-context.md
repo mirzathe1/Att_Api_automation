@@ -12,15 +12,6 @@
 # Error details
 
 ```
-Error: POST failed for row 1
-
-expect(received).toBe(expected) // Object.is equality
-
-Expected: 200
-Received: 422
-```
-
-```
 Error: POST failed for row 2
 
 expect(received).toBe(expected) // Object.is equality
@@ -53,7 +44,7 @@ Error: POST failed for row 6
 expect(received).toBe(expected) // Object.is equality
 
 Expected: 400
-Received: 422
+Received: 200
 ```
 
 ```
@@ -71,7 +62,7 @@ Error: POST failed for row 8
 expect(received).toBe(expected) // Object.is equality
 
 Expected: 400
-Received: 422
+Received: 200
 ```
 
 ```
@@ -98,7 +89,7 @@ Error: POST failed for row 11
 expect(received).toBe(expected) // Object.is equality
 
 Expected: 400
-Received: 422
+Received: 200
 ```
 
 ```
@@ -143,7 +134,7 @@ Error: POST failed for row 16
 expect(received).toBe(expected) // Object.is equality
 
 Expected: 400
-Received: 422
+Received: 200
 ```
 
 # Test source

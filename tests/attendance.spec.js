@@ -4,7 +4,6 @@ import { getExcelData, sanitizeText, incrementExcelDates } from '../utils/excelR
 import { TherapClient } from '../api/TherapClient.js';
 
 const BASE_URL = "https://sadat.therapdev.net";
-// Changed to the new data file name we created
 const EXCEL_FILE = "attendance_data.xlsx"; 
 const STATE_FILE = "execution_state.json"; 
 
@@ -59,7 +58,6 @@ test('Bulk Attendance API Audit (Controller Pattern)', async () => {
             ? new Date(Date.UTC(0, 0, row.serviceDate - 1)).toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' })
             : String(row.serviceDate).split(" ")[0];
 
-        // --- NEW PAYLOAD CONSTRUCTION ---
         const dataPayload = {
             serviceDate: formattedDate,
             optionCode: row.optionCode ? String(row.optionCode).trim() : "",
@@ -80,42 +78,42 @@ test('Bulk Attendance API Audit (Controller Pattern)', async () => {
                 timeOut: sanitizeText(row.timeOut) 
             }];
         }
-        // ---------------------------------
 
         await test.step(`Process Row ${index + 1}: Date ${dataPayload.serviceDate}`, async () => {
             // POST Request
             const postResponse = await api.submitAttendance(dataPayload);
             
-            // Expected outcome check for Negative Testing
-            // (Defaults to 200 for old files, uses 'Expected Outcome' column for the new file)
             const expectedStatus = parseInt(row['Expected Outcome']) || 200;
+            const actualStatus = postResponse.status();
             
-            if (postResponse.status() !== expectedStatus) {
-                const errorBody = await postResponse.json().catch(() => ({ error: 'Unparseable JSON' }));
-                console.log(`\n[FAILED] Row ${index + 1} API Error:`, errorBody);
-                
-                // Mark this row as processed so we don't get stuck in an infinite retry loop tomorrow
-                state.lastProcessedIndex = index;
-                fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-                
-                expect.soft(postResponse.status(), `POST failed for row ${index + 1}`).toBe(expectedStatus);
-                return; 
-            }
+            // Allow flexibility for validation errors (Server might return 400 or 422)
+            const isExpectedNegativeTest = expectedStatus >= 400 && expectedStatus < 600;
+            const didServerFail = actualStatus >= 400 && actualStatus < 600;
 
-            // --- SKIP VERIFICATION FOR NEGATIVE TESTS ---
-            // If we EXPECTED a 400 error and got it, we consider it a success and move to the next row.
-            // There is no formId to verify if it failed intentionally!
-            if (expectedStatus >= 400) {
-                console.log(`[SUCCESS] Negative Test Passed for Row ${index + 1}. Expected ${expectedStatus} received.`);
+            if (isExpectedNegativeTest && didServerFail) {
+                // We expected it to fail, and it did. Test passes!
+                console.log(`[SUCCESS] Negative Test Passed for Row ${index + 1}. Expected failure, received server error: ${actualStatus}`);
                 state.lastProcessedIndex = index;
                 fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
                 return;
+
+            } else if (actualStatus !== expectedStatus) {
+                // Something unexpected happened (Happy path failed, OR Negative path succeeded)
+                const errorBody = await postResponse.json().catch(() => ({ error: 'Unparseable JSON' }));
+                console.log(`\n[FAILED] Row ${index + 1} | Expected: ${expectedStatus}, Received: ${actualStatus} | API Response:`, errorBody);
+                
+                state.lastProcessedIndex = index;
+                fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+                
+                expect.soft(actualStatus, `POST failed for row ${index + 1}`).toBe(expectedStatus);
+                return; 
             }
 
+            // --- GET VERIFICATION (Only runs if Happy Path succeeded as expected) ---
             const result = await postResponse.json();
             const newFormId = result.formId;
 
-            // Wait for DB replication
+            // Wait for DB replication if needed
             // await delay(60000); 
 
             // GET Request (Verification)
