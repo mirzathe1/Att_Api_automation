@@ -1,17 +1,26 @@
 {
   "name": "therap_api_automation",
   "version": "1.0.0",
-  "description": "",
+  "description": "Therap Attendance API Automation Test Suite",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mirzathe1/Att_Api_automation.git"
   },
-  "keywords": [],
+  "keywords": [
+    "playwright",
+    "api-testing",
+    "automation",
+    "therap"
+  ],
   "author": "",
   "license": "ISC",
   "bugs": {
@@ -19,7 +28,6 @@
   },
   "homepage": "https://github.com/mirzathe1/Att_Api_automation#readme",
   "dependencies": {
-    "playwright": "^1.60.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
