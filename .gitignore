@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Test Reports and Results
+playwright-report/
+test-results/
+
+# Execution State & Local Caches
+execution_state.json
+.test_run_cache.json
+
+# Environment variables
+.env
+.env.local
+
+# Patch and OS files
+*.patch
+.DS_Store
+Thumbs.db
